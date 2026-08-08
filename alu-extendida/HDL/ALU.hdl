@@ -1,0 +1,161 @@
+CHIP ALU {
+    IN  
+        x[16], y[16],  // Entradas de datos de 16 bits
+        zx,            // Zero x
+        nx,            // Not x
+        zy,            // Zero y
+        ny,            // Not y
+        f,             // Function selection: 1 = Add/Custom, 0 = And/Custom
+        no;            // Not output
+
+    OUT 
+        out[16],       // Salida de 16 bits
+        zr,            // 1 si out == 0, 0 en otro caso
+        ng;            // 1 si out < 0, 0 en otro caso
+
+    PARTS:
+    // =============================================================
+    // 1. PREPROCESAMIENTO DE LAS ENTRADAS X e Y
+    // =============================================================
+    
+    // Procesar X: zx (Zero X) y nx (Not X)
+    Mux16(a=x, b=false, sel=zx, out=xZeroed);
+    Not16(in=xZeroed, out=notXZeroed);
+    Mux16(a=xZeroed, b=notXZeroed, sel=nx, out=xProcessed);
+
+    // Procesar Y: zy (Zero Y) y ny (Not Y)
+    Mux16(a=y, b=false, sel=zy, out=yZeroed);
+    Not16(in=yZeroed, out=notYZeroed);
+    Mux16(a=yZeroed, b=notYZeroed, sel=ny, out=yProcessed);
+
+    // =============================================================
+    // 2. OPERACIONES BÁSICAS Y EXTENDIDAS
+    // =============================================================
+
+    // --- Operaciones Estándar de la ALU ---
+    And16(a=xProcessed, b=yProcessed, out=outAnd);
+    Add16(a=xProcessed, b=yProcessed, out=outAdd);
+
+    // --- Operación A: XOR (010110) ---
+    // A XOR B = (A OR B) AND NOT(A AND B)
+    Or16(a=xProcessed, b=yProcessed, out=xOrY);
+    Not16(in=outAnd, out=notXAndY); // Reutilizamos outAnd
+    
+    // AQUÍ SE EVITA EL ERROR DE INDEXACIÓN:
+    // Se extraen los buses de 8 bits directamente en la salida de And16
+    And16(a=xOrY, b=notXAndY, 
+          out=outXor, 
+          out[0..7]=outXorLow, 
+          out[8..15]=outXorHigh);
+
+    // --- Operación B: NAND (000001) ---
+    // NOT(xProcessed AND yProcessed)
+    Not16(in=outAnd, out=outNand);
+
+    // --- Operación C: NOR (110100) ---
+    // NOT(xProcessed OR yProcessed)
+    Not16(in=xOrY, out=outNor);
+
+    // --- Operación D: EQ (101000) ---
+    // x == y equivale a NOT(OR8Way(XOR_Low) OR OR8Way(XOR_High))
+    Or8Way(in=outXorLow, out=orEqLow);
+    Or8Way(in=outXorHigh, out=orEqHigh);
+    Or(a=orEqLow, b=orEqHigh, out=diffBits);
+    Not(in=diffBits, out=isEqualBit);
+    Mux16(a=false, b[0]=isEqualBit, b[1..15]=false, sel=true, out=outEq);
+
+    // --- Operación E: ABS (100010) ---
+    // Valor absoluto de x: Si x < 0 (xProcessed[15] == 1), retorna -x (NOT(x) + 1)
+    Not16(in=xProcessed, out=notX);
+    Add16(a=notX, b[0]=true, b[1..15]=false, out=negX);
+    
+    // Evaluamos el bit de signo de xProcessed directamente
+    And16(a=xProcessed, b=true, out[15]=signX);
+    Mux16(a=xProcessed, b=negX, sel=signX, out=outAbs);
+
+    // =============================================================
+    // 3. DECODIFICACIÓN DE CONTROLES Y SELECCIÓN DE SALIDA
+    // =============================================================
+
+    // Identificación de códigos de control específicos
+    // isXor: 010110
+    // isNand: 000001
+    // isNor: 110100
+    // isEq: 101000
+    // isAbs: 100010
+
+    Not(in=zx, out=notZx);
+    Not(in=nx, out=notNx);
+    Not(in=zy, out=notZy);
+    Not(in=ny, out=notNy);
+    Not(in=f,  out=notF);
+    Not(in=no, out=notNo);
+
+    // Detectar XOR (010110)
+    And(a=notZx, b=nx, out=cXor1);
+    And(a=notZy, b=ny, out=cXor2);
+    And(a=f, b=notNo, out=cXor3);
+    And(a=cXor1, b=cXor2, out=cXor12);
+    And(a=cXor12, b=cXor3, out=isXor);
+
+    // Detectar NAND (000001)
+    And(a=notZx, b=notNx, out=cNand1);
+    And(a=notZy, b=notNy, out=cNand2);
+    And(a=notF, b=no, out=cNand3);
+    And(a=cNand1, b=cNand2, out=cNand12);
+    And(a=cNand12, b=cNand3, out=isNand);
+
+    // Detectar NOR (110100)
+    And(a=zx, b=nx, out=cNor1);
+    And(a=notZy, b=ny, out=cNor2);
+    And(a=notF, b=notNo, out=cNor3);
+    And(a=cNor1, b=cNor2, out=cNor12);
+    And(a=cNor12, b=cNor3, out=isNor);
+
+    // Detectar EQ (101000)
+    And(a=zx, b=notNx, out=cEq1);
+    And(a=zy, b=notNy, out=cEq2);
+    And(a=notF, b=notNo, out=cEq3);
+    And(a=cEq1, b=cEq2, out=cEq12);
+    And(a=cEq12, b=cEq3, out=isEq);
+
+    // Detectar ABS (100010)
+    And(a=zx, b=notNx, out=cAbs1);
+    And(a=notZy, b=notNy, out=cAbs2);
+    And(a=f, b=notNo, out=cAbs3);
+    And(a=cAbs1, b=cAbs2, out=cAbs12);
+    And(a=cAbs12, b=cAbs3, out=isAbs);
+
+    // Red de Selección con Multiplexores
+    // 1. Elegir entre Add y And (ALU estándar)
+    Mux16(a=outAnd, b=outAdd, sel=f, out=outStandardRaw);
+    Not16(in=outStandardRaw, out=notStandardRaw);
+    Mux16(a=outStandardRaw, b=notStandardRaw, sel=no, out=outStandard);
+
+    // 2. Reemplazar la salida por las funciones extendidas si aplica
+    Mux16(a=outStandard, b=outXor, sel=isXor, out=m1);
+    Mux16(a=m1, b=outNand, sel=isNand, out=m2);
+    Mux16(a=m2, b=outNor, sel=isNor, out=m3);
+    Mux16(a=m3, b=outEq, sel=isEq, out=m4);
+    Mux16(a=m4, b=outAbs, sel=isAbs, out=finalOut);
+
+    // =============================================================
+    // 4. GENERACIÓN DE BANDERAS Y SALIDA FINAL
+    // =============================================================
+
+    // Dividimos la salida en partes para procesar zr y ng
+    Or16(a=finalOut, b=false, 
+         out=out, 
+         out[0..7]=outLow, 
+         out[8..15]=outHigh, 
+         out[15]=msb);
+
+    // ng = 1 si la salida es negativa (el bit 15 / MSB es 1)
+    And(a=msb, b=true, out=ng);
+
+    // zr = 1 si todos los bits son 0 (NOT(OR_bits))
+    Or8Way(in=outLow, out=orLow);
+    Or8Way(in=outHigh, out=orHigh);
+    Or(a=orLow, b=orHigh, out=nonzero);
+    Not(in=nonzero, out=zr);
+}
