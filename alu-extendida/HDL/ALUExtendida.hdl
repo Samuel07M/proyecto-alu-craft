@@ -1,135 +1,112 @@
 CHIP ALUExtendida {
-    IN
-        x[16], y[16], a, zx, nx, zy, ny, f, no;
-        
-    OUT
+    IN  
+        x[16], y[16], zx, nx, zy, ny, f, no;
+
+    OUT 
         out[16], zr, ng;
 
     PARTS:
-    // Logica de la ALU original
-    // zx
-    Mux16(a=x, b=false, sel=zx, out=origOutzx);
-    // nx
-    Not16(in=origOutzx, out=origOutnx);
-    Mux16(a=origOutzx, b=origOutnx, sel=nx, out=origOutprex);
-    // zy
-    Mux16(a=y, b=false, sel=zy, out=origOutzy);
-    // ny
-    Not16(in=origOutzy, out=origOutny);
-    Mux16(a=origOutzy, b=origOutny, sel=ny, out=origOutprey);
-    // f
-    And16(a=origOutprex, b=origOutprey, out=origOutandxy);
-    Add16(a=origOutprex, b=origOutprey, out=origOutaddxy);
-    Mux16(a=origOutandxy, b=origOutaddxy, sel=f, out=origOutfxy);
-    // no
-    Not16(in=origOutfxy, out=origOutnfxy);
-    Mux16(a=origOutfxy, b=origOutnfxy, sel=no, out=oldOut, out[15]=oldNg, out[0..7]=origZr1, out[8..15]=origZr2);
-    // zr
-    Or8Way(in=origZr1, out=origOutor1);
-    Or8Way(in=origZr2, out=origOutor2);
-    Or(a=origOutor1, b=origOutor2, out=origOutor);
-    Not(in=origOutor, out=oldZr);
+    // ALU Original
+    // zx y nx
+    Mux16(a=x, b=false, sel=zx, out=xZeroed);
+    Not16(in=xZeroed, out=notXZeroed);
+    Mux16(a=xZeroed, b=notXZeroed, sel=nx, out=xProcessed);
 
-    // Logica de la ALU extendida
-    // Negaciones de las señales de control
-    Not(in=zx, out=nzx);
-    Not(in=nx, out=nnx);
-    Not(in=zy, out=nzy);
-    Not(in=ny, out=nny);
-    Not(in=f, out=nf);
-    Not(in=no, out=nno);
+    // zy y ny
+    Mux16(a=y, b=false, sel=zy, out=yZeroed);
+    Not16(in=yZeroed, out=notYZeroed);
+    Mux16(a=yZeroed, b=notYZeroed, sel=ny, out=yProcessed);
 
-    // Decodificador de operaciones nuevas
-    // XOR 010110 -> zx=0 nx=1 zy=0 ny=1 f=1 no=0
-    And(a=nzx, b=nx, out=xorT1);
-    And(a=xorT1, b=nzy, out=xorT2);
-    And(a=xorT2, b=ny, out=xorT3);
-    And(a=xorT3, b=f, out=xorT4);
-    And(a=xorT4, b=nno, out=selXor);
+    // Operaciones f
+    And16(a=xProcessed, b=yProcessed, out=outAnd);
+    Add16(a=xProcessed, b=yProcessed, out=outAdd);
 
-    // NAND 000001 -> zx=0 nx=0 zy=0 ny=0 f=0 no=1
-    And(a=nzx, b=nnx, out=nandT1);
-    And(a=nandT1, b=nzy, out=nandT2);
-    And(a=nandT2, b=nny, out=nandT3);
-    And(a=nandT3, b=nf, out=nandT4);
-    And(a=nandT4, b=no, out=selNand);
-
-    // NOR 110100 -> zx=1 nx=1 zy=0 ny=1 f=0 no=0
-    And(a=zx, b=nx, out=norT1);
-    And(a=norT1, b=nzy, out=norT2);
-    And(a=norT2, b=ny, out=norT3);
-    And(a=norT3, b=nf, out=norT4);
-    And(a=norT4, b=nno, out=selNor);
-
-    // EQ 101000 -> zx=1 nx=0 zy=1 ny=0 f=0 no=0
-    And(a=zx, b=nnx, out=eqT1);
-    And(a=eqT1, b=zy, out=eqT2);
-    And(a=eqT2, b=nny, out=eqT3);
-    And(a=eqT3, b=nf, out=eqT4);
-    And(a=eqT4, b=nno, out=selEq);
-
-    // ABS 100010 -> zx=1 nx=0 zy=0 ny=0 f=1 no=0
-    And(a=zx, b=nnx, out=absT1);
-    And(a=absT1, b=nzy, out=absT2);
-    And(a=absT2, b=nny, out=absT3);
-    And(a=absT3, b=f, out=absT4);
-    And(a=absT4, b=nno, out=selAbs);
-
-    // Calculo de las nuevas funciones
-    // XOR
+    // Operacion XOR (010110) / x XOR y = (x AND !y) OR (!x AND y)
     Not16(in=x, out=notX);
     Not16(in=y, out=notY);
     And16(a=x, b=notY, out=xAndNotY);
     And16(a=notX, b=y, out=notXAndY);
-    Or16(a=xAndNotY, b=notXAndY, out=xorOut, out[0..7]=xorLow, out[8..15]=xorHigh);
+    Or16(a=xAndNotY, b=notXAndY, out=outXor, out[0..7]=xorLow, out[8..15]=xorHigh);
 
-    // NAND
-    And16(a=x, b=y, out=andXY);
-    Not16(in=andXY, out=nandOut);
+    // Operacion NAND (000001)
+    Not16(in=outAnd, out=outNand);
 
-    // NOR
+    // Operacion NOR (110100)
     Or16(a=x, b=y, out=orXY);
-    Not16(in=orXY, out=norOut);
+    Not16(in=orXY, out=outNor);
 
-    // EQ
-    Or8Way(in=xorLow, out=diffLow);
-    Or8Way(in=xorHigh, out=diffHigh);
-    Or(a=diffLow, b=diffHigh, out=anyDiff);
-    Not(in=anyDiff, out=eqBit);
-    Inc16(in=false, out=oneConst);
-    Mux16(a=false, b=oneConst, sel=eqBit, out=eqOut);
+    // Operacion EQ (101000)
+    Or8Way(in=xorLow, out=orEqLow);
+    Or8Way(in=xorHigh, out=orEqHigh);
+    Or(a=orEqLow, b=orEqHigh, out=diffBits);
+    Not(in=diffBits, out=isEqualBit);
+    Mux16(a=false, b[0]=isEqualBit, b[1..15]=false, sel=true, out=outEq);
 
-    // ABS
+    // Operacion ABS (100010)
     Inc16(in=notX, out=negX);
-    Mux16(a=x, b=negX, sel=x[15], out=absOut);
+    Mux16(a=x, b=negX, sel=x[15], out=outAbs);
 
-    // Seleccion de la operacion nueva
-    Mux16(a=false, b=true, sel=selXor, out=maskXor);
-    And16(a=xorOut, b=maskXor, out=cXor);
+    // Decodificador de señales de control
+    Not(in=zx, out=notZx);
+    Not(in=nx, out=notNx);
+    Not(in=zy, out=notZy);
+    Not(in=ny, out=notNy);
+    Not(in=f,  out=notF);
+    Not(in=no, out=notNo);
 
-    Mux16(a=false, b=true, sel=selNand, out=maskNand);
-    And16(a=nandOut, b=maskNand, out=cNand);
+    // XOR 010110 -> zx=0 nx=1 zy=0 ny=1 f=1 no=0
+    And(a=notZx, b=nx, out=cXor1);
+    And(a=notZy, b=ny, out=cXor2);
+    And(a=f, b=notNo, out=cXor3);
+    And(a=cXor1, b=cXor2, out=cXor12);
+    And(a=cXor12, b=cXor3, out=isXor);
 
-    Mux16(a=false, b=true, sel=selNor, out=maskNor);
-    And16(a=norOut, b=maskNor, out=cNor);
+    // NAND 000001 -> zx=0 nx=0 zy=0 ny=0 f=0 no=1
+    And(a=notZx, b=notNx, out=cNand1);
+    And(a=notZy, b=notNy, out=cNand2);
+    And(a=notF, b=no, out=cNand3);
+    And(a=cNand1, b=cNand2, out=cNand12);
+    And(a=cNand12, b=cNand3, out=isNand);
 
-    Mux16(a=false, b=true, sel=selEq, out=maskEq);
-    And16(a=eqOut, b=maskEq, out=cEq);
+    // NOR 110100 -> zx=1 nx=1 zy=0 ny=1 f=0 no=0
+    And(a=zx, b=nx, out=cNor1);
+    And(a=notZy, b=ny, out=cNor2);
+    And(a=notF, b=notNo, out=cNor3);
+    And(a=cNor1, b=cNor2, out=cNor12);
+    And(a=cNor12, b=cNor3, out=isNor);
 
-    Mux16(a=false, b=true, sel=selAbs, out=maskAbs);
-    And16(a=absOut, b=maskAbs, out=cAbs);
+    // EQ 101000 -> zx=1 nx=0 zy=1 ny=0 f=0 no=0
+    And(a=zx, b=notNx, out=cEq1);
+    And(a=zy, b=notNy, out=cEq2);
+    And(a=notF, b=notNo, out=cEq3);
+    And(a=cEq1, b=cEq2, out=cEq12);
+    And(a=cEq12, b=cEq3, out=isEq);
 
-    Or16(a=cXor, b=cNand, out=orNew1);
-    Or16(a=orNew1, b=cNor, out=orNew2);
-    Or16(a=orNew2, b=cEq, out=orNew3);
-    Or16(a=orNew3, b=cAbs, out=newOut);
+    // ABS 100010 -> zx=1 nx=0 zy=0 ny=0 f=1 no=0
+    And(a=zx, b=notNx, out=cAbs1);
+    And(a=notZy, b=notNy, out=cAbs2);
+    And(a=f, b=notNo, out=cAbs3);
+    And(a=cAbs1, b=cAbs2, out=cAbs12);
+    And(a=cAbs12, b=cAbs3, out=isAbs);
 
-    // Seleccion final entre ALU original (a=0) y ALUExtendida (a=1)
-    Mux16(a=oldOut, b=newOut, sel=a, out=out, out[15]=ng, out[0..7]=zr1, out[8..15]=zr2);
+    // Seleccion de salidas y generacion de banderas
+    // Resultado de la ALU Original
+    Mux16(a=outAnd, b=outAdd, sel=f, out=outPreStandard);
+    Not16(in=outPreStandard, out=notPreStandard);
+    Mux16(a=outPreStandard, b=notPreStandard, sel=no, out=outStandard);
 
-    // Flags calculados sobre la salida final seleccionada
-    Or8Way(in=zr1, out=orZ1);
-    Or8Way(in=zr2, out=orZ2);
-    Or(a=orZ1, b=orZ2, out=orZ);
-    Not(in=orZ, out=zr);
+    // Cambiar a la funcion extendida correspondiente si fue activada
+    Mux16(a=outStandard, b=outXor, sel=isXor, out=m1);
+    Mux16(a=m1, b=outNand, sel=isNand, out=m2);
+    Mux16(a=m2, b=outNor, sel=isNor, out=m3);
+    Mux16(a=m3, b=outEq, sel=isEq, out=m4);
+
+    // Asigna out, extrae sub-buses para zr y manda el MSB directo a ng
+    Mux16(a=m4, b=outAbs, sel=isAbs, out=out, out[0..7]=outLow, out[8..15]=outHigh, out[15]=ng);
+
+    // Calculo de zr
+    Or8Way(in=outLow, out=orLow);
+    Or8Way(in=outHigh, out=orHigh);
+    Or(a=orLow, b=orHigh, out=nozero);
+    Not(in=nozero, out=zr);
 }
